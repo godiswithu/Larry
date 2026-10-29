@@ -1,0 +1,179 @@
+
+# Assignment No. 3: Hybrid Recommender System for Movie Rating Applications
+
+# STEP 0: IMPORT REQUIRED LIBRARIES
+
+import pandas as pd  # Imports Pandas to store and manage movie and rating data in tables.
+from sklearn.feature_extraction.text import TfidfVectorizer  # Converts movie descriptions into numerical features.
+from sklearn.metrics.pairwise import linear_kernel  # Calculates similarity between movie content vectors.
+from sklearn.metrics import pairwise_distances  # Provides functions for calculating distances between vectors; not needed in this implementation.
+from scipy.sparse import csr_matrix  # Provides an efficient sparse matrix format; not needed in this implementation.
+from sklearn.decomposition import TruncatedSVD  # Imports SVD to identify patterns in user ratings.
+
+
+# STEP 1: LOAD THE SAMPLE DATASET
+
+movies_data = {  # Creates a dictionary containing movie details.
+
+    'title': [  # Stores the titles of the movies.
+        'The Shawshank Redemption',
+        'The Godfather',
+        'The Dark Knight',
+        'Pulp Fiction',
+        'The Lord of the Rings: The Return of the King'
+    ],
+
+    'genres': [  # Stores the genres of each movie.
+        'Drama',
+        'Crime, Drama',
+        'Action, Crime, Drama',
+        'Crime, Drama',
+        'Action, Adventure, Fantasy'
+    ],
+
+    'description': [  # Stores a short description of each movie.
+        'Two imprisoned men bond over years, finding solace through common decency.',
+        'The aging patriarch of an organized crime dynasty transfers control to his son.',
+        'When the Joker emerges, he wreaks havoc on Gotham.',
+        'The lives of two mob hitmen and others intertwine in tales of violence.',
+        'Gandalf and Aragorn lead the World of Men against Sauron.'
+    ]
+}
+
+movies_df = pd.DataFrame(movies_data)  # Converts the movie dictionary into a Pandas DataFrame.
+
+ratings_data = {  # Creates a dictionary containing user ratings for different movies.
+
+    'user_id': [1, 1, 1, 2, 2, 3, 3],  # Identifies the users who rated the movies.
+
+    'title': [  # Stores the titles of the movies that received ratings.
+        'The Shawshank Redemption', 'The Godfather', 'The Dark Knight',
+        'The Dark Knight', 'Pulp Fiction', 'The Shawshank Redemption', 'Pulp Fiction'
+    ],
+
+    'rating': [5, 4, 5, 4, 5, 5, 4]  # Stores the ratings given by users.
+}
+
+ratings_df = pd.DataFrame(ratings_data)  # Converts the ratings dictionary into a DataFrame.
+
+
+# STEP 2: PREPROCESS DATA FOR CONTENT-BASED FILTERING
+
+movies_df['content'] = movies_df['genres'] + ' ' + movies_df['description']  # Combines each movie's genres and description into one text field.
+
+tfidf = TfidfVectorizer(stop_words='english')  # Creates a vectorizer that ignores common English words.
+
+tfidf_matrix = tfidf.fit_transform(movies_df['content'])  # Converts the movie content into numerical TF-IDF vectors.
+
+cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)  # Calculates content similarity scores between every pair of movies.
+
+
+# STEP 3: IMPLEMENT COLLABORATIVE FILTERING
+
+user_item_matrix = ratings_df.pivot(  # Converts the ratings table into a matrix of users and movies.
+    index='user_id',  # Places each user in a separate row.
+    columns='title',  # Places each rated movie in a separate column.
+    values='rating'  # Fills the matrix with the ratings given by users.
+).fillna(0)  # Replaces missing ratings with 0 to represent movies that have not been rated.
+
+svd = TruncatedSVD(n_components=2, random_state=42)  # Creates an SVD model with two components to learn patterns in ratings.
+
+user_features = svd.fit_transform(user_item_matrix)  # Learns hidden patterns from the user-item matrix.
+
+item_features = svd.components_  # Stores the learned component values for the movie columns.
+
+predicted_ratings = user_features @ item_features  # Reconstructs approximate ratings by multiplying the two matrices.
+
+predicted_df = pd.DataFrame(  # Converts the predicted rating array into a readable DataFrame.
+    predicted_ratings,  # Supplies the predicted rating values.
+    index=user_item_matrix.index,  # Preserves the user IDs as row labels.
+    columns=user_item_matrix.columns  # Preserves the movie titles as column labels.
+)
+
+
+# STEP 4: CREATE THE HYBRID RECOMMENDATION FUNCTION
+
+def recommend_movies(user_id, top_n=3, content_weight=0.5):  # Defines a function to combine content similarity and predicted ratings.
+
+    if user_id not in user_item_matrix.index:  # Checks whether the requested user exists.
+        return f"User ID {user_id} not found."  # Returns a message if the user is missing.
+
+    rated_movies = user_item_matrix.loc[user_id]  # Retrieves the original ratings of the selected user.
+
+    unrated_movies = rated_movies[rated_movies == 0].index  # Finds the movies the user has not rated.
+
+    if len(unrated_movies) == 0:  # Checks whether the user has rated every movie in the dataset.
+        return pd.Series(dtype='float64')  # Returns an empty result if no unrated movies are available.
+
+    user_pred = predicted_df.loc[user_id]  # Retrieves the predicted ratings for the selected user.
+
+    content_scores = pd.Series(0.0, index=movies_df['title'])  # Creates an initial content score of zero for each movie.
+
+    rated_indices = [  # Starts collecting the movie indices for movies the user has rated.
+        movies_df.index[movies_df['title'] == title][0]  # Finds the dataset index of each rated movie.
+        for title in rated_movies[rated_movies > 0].index  # Selects only movies that have actual ratings.
+        if title in movies_df['title'].values  # Ensures the movie exists in the movie dataset.
+    ]
+
+    if rated_indices:  # Checks whether the user has at least one rated movie.
+        for movie_idx in rated_indices:  # Loops through the movies the user has rated.
+            movie_title = movies_df.loc[movie_idx, 'title']  # Retrieves the title of the rated movie.
+            rating = rated_movies[movie_title]  # Retrieves the user's rating for that movie.
+            content_scores += pd.Series(  # Adds a rating-weighted similarity score for every movie.
+                cosine_sim[movie_idx] * rating,  # Multiplies similarity scores by the user's rating.
+                index=movies_df['title']  # Associates each similarity score with its movie title.
+            )
+
+        content_scores = content_scores / len(rated_indices)  # Averages the content scores across the user's rated movies.
+
+    collaborative_scores = user_pred.reindex(movies_df['title']).fillna(0)  # Aligns predicted ratings with all movie titles.
+
+    content_scores = content_scores.reindex(movies_df['title']).fillna(0)  # Ensures content scores use the same movie order.
+
+    content_min = content_scores.min()  # Finds the smallest content score.
+    content_max = content_scores.max()  # Finds the largest content score.
+
+    if content_max > content_min:  # Checks whether the content scores vary.
+        content_scores = (content_scores - content_min) / (content_max - content_min)  # Scales content scores between 0 and 1.
+
+    collab_min = collaborative_scores.min()  # Finds the smallest predicted rating.
+    collab_max = collaborative_scores.max()  # Finds the largest predicted rating.
+
+    if collab_max > collab_min:  # Checks whether the predicted ratings vary.
+        collaborative_scores = (collaborative_scores - collab_min) / (collab_max - collab_min)  # Scales predicted ratings between 0 and 1.
+
+    hybrid_scores = (  # Starts calculating the combined recommendation score.
+        content_weight * content_scores  # Gives the content-based score its chosen weight.
+        + (1 - content_weight) * collaborative_scores  # Gives the collaborative score the remaining weight.
+    )
+
+    hybrid_scores = hybrid_scores.drop(labels=rated_movies[rated_movies > 0].index, errors='ignore')  # Removes movies the user has already rated.
+
+    recommendations = hybrid_scores.sort_values(ascending=False).head(top_n)  # Selects the highest-scoring unrated movies.
+
+    return recommendations  # Returns the recommended movie titles and their hybrid scores.
+
+
+# STEP 5: TEST THE HYBRID RECOMMENDATION SYSTEM
+
+if __name__ == '__main__':  # Runs the test section when this file is executed directly.
+
+    target_user = 1  # Selects User 1 to receive movie recommendations.
+
+    recommended_movies = recommend_movies(target_user, top_n=3)  # Requests up to three recommendations for User 1.
+
+    print(f"Hybrid Recommendations for User {target_user}:")  # Prints a heading showing the selected user.
+
+    if isinstance(recommended_movies, str):  # Checks whether the function returned an error message.
+        print(recommended_movies)  # Displays the error message if the user does not exist.
+    elif recommended_movies.empty:  # Checks whether any recommendations are available.
+        print("No unrated movies available to recommend.")  # Displays a message if no recommendations are available.
+    else:  # Runs when recommendations are available.
+        for movie, score in recommended_movies.items():  # Loops through each recommended movie and its score.
+            print(f"Movie: {movie} | Hybrid Score: {score:.3f}")  # Prints the movie title and its combined score.
+
+
+The program imports libraries such as Pandas, NumPy, TF-IDF Vectorizer, Cosine Similarity, and Truncated SVD to implement content-based and collaborative-filtering techniques. Movie titles and descriptions are stored in a dataset, while user ratings are used to create a user-item matrix. TF-IDF converts movie descriptions into numerical vectors, and Cosine Similarity calculates how similar the movies are based on their content. The user-item matrix represents the ratings given by different users to different movies. Truncated SVD reduces the rating matrix into a smaller representation to identify patterns in user preferences. The program uses these patterns to estimate movie preferences and calculate recommendation scores. The hybrid recommendation function combines the content-based similarity scores and collaborative-filtering scores to rank movies. Finally, it selects and displays movies with the highest combined scores, providing recommendations based on both movie descriptions and user preferences.
+
+my project is a Hybrid Movie Recommendation System. It combines two approaches: content-based filtering and collaborative filtering. Content-based filtering recommends movies based on their descriptions, while collaborative filtering uses user ratings to find patterns in user preferences. First, I store movie information and user ratings in datasets. I use TF-IDF and Cosine Similarity to compare movie descriptions. Then I create a user-item rating matrix and apply Truncated SVD to identify patterns in the ratings. After that, I combine the scores from both methods to rank the movies. Finally, the system recommends movies with the highest combined scores. The main advantage of this approach is that it uses both movie content and user preferences instead of depending on only one method.
+
