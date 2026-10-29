@@ -1,0 +1,96 @@
+
+# Assignment No. 2: Content-Based Movie Recommendation System
+
+# STEP 0: IMPORT REQUIRED LIBRARIES
+
+import pandas as pd  # Imports Pandas to store movie information in a table.
+from sklearn.feature_extraction.text import TfidfVectorizer  # Converts movie text into numerical features using TF-IDF.
+from sklearn.metrics.pairwise import linear_kernel  # Calculates similarity scores between movie feature vectors.
+
+
+# STEP 1: CREATE THE MOVIE DATASET
+
+data = {  # Creates a dictionary containing movie titles, genres, and descriptions.
+
+    'title': [  # Stores the names of the movies.
+        'The Shawshank Redemption',
+        'The Godfather',
+        'The Dark Knight',
+        'Pulp Fiction',
+        'The Lord of the Rings: The Return of the King'
+    ],
+
+    'genres': [  # Stores the genres associated with each movie.
+        'Drama',
+        'Crime, Drama',
+        'Action, Crime, Drama',
+        'Crime, Drama',
+        'Action, Adventure, Fantasy'
+    ],
+
+    'description': [  # Stores a short description of each movie.
+        'Two imprisoned men bond over a number of years, finding solace and eventual redemption through acts of common decency.',
+        'The aging patriarch of an organized crime dynasty transfers control of his reluctant son.',
+        'When the menace known as the Joker emerges, he wreaks havoc and chaos on Gotham.',
+        'The lives of two mob hitmen, a boxer, a gangster\'s wife, and diner bandits intertwine in tales of violence and redemption.',
+        'Gandalf and Aragorn lead the World of Men against Sauron\'s army to save Middle-earth.'
+    ]
+}
+
+movies_df = pd.DataFrame(data)  # Converts the dictionary into a Pandas DataFrame, with one row per movie.
+
+
+# STEP 2: PREPROCESS THE DATA
+
+movies_df['content'] = movies_df['genres'] + ' ' + movies_df['description']  # Combines each movie's genres and description into one text field.
+
+
+# STEP 3: CONVERT TEXT INTO NUMBERS USING TF-IDF
+
+tfidf = TfidfVectorizer(stop_words='english')  # Creates a TF-IDF vectorizer and ignores common English words such as "the" and "is".
+
+tfidf_matrix = tfidf.fit_transform(movies_df['content'])  # Learns important words from the movie content and converts the text into numerical vectors.
+
+cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)  # Calculates similarity scores between every pair of movies using the dot product of their TF-IDF vectors.
+
+
+# STEP 4: BUILD THE RECOMMENDATION FUNCTION
+
+def get_recommendations(title, cosine_sim=cosine_sim):  # Defines a function that returns movies similar to the selected movie.
+
+    matching_movies = movies_df.index[movies_df['title'] == title]  # Finds the row index of the movie matching the requested title.
+
+    if len(matching_movies) == 0:  # Checks whether the requested movie exists in the dataset.
+        return pd.Series(dtype='object')  # Returns an empty result if the movie is not found.
+
+    idx = matching_movies[0]  # Gets the row index of the matching movie.
+
+    sim_scores = list(enumerate(cosine_sim[idx]))  # Pairs each movie's row index with its similarity score to the selected movie.
+
+    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)  # Sorts movies from highest similarity score to lowest.
+
+    sim_scores = sim_scores[1:4]  # Selects the next three movies, excluding the selected movie itself.
+
+    movie_indices = [i[0] for i in sim_scores]  # Extracts the row indices of the three recommended movies.
+
+    return movies_df['title'].iloc[movie_indices]  # Returns the titles of the recommended movies.
+
+
+# STEP 5: TEST THE RECOMMENDATION SYSTEM
+
+if __name__ == '__main__':  # Runs the testing code only when this Python file is executed directly.
+
+    recommended_movies = get_recommendations('The Godfather')  # Requests recommendations for the movie The Godfather.
+
+    print("Recommendations for 'The Godfather':")  # Prints a heading for the recommendations.
+
+    if recommended_movies.empty:  # Checks whether the function returned no recommendations.
+        print("Movie not found or no recommendations available.")  # Displays a message if the result is empty.
+    else:  # Runs when recommendations are available.
+        print(recommended_movies.to_string(index=False))  # Displays the recommended movie titles without their DataFrame row indices.
+
+
+
+The program first imports Pandas to manage movie data, TF-IDF Vectorizer to convert movie descriptions into numerical values, and Cosine Similarity to compare movies. A dictionary is created containing movie titles and their descriptions, which is converted into a DataFrame using pd.DataFrame(). The TfidfVectorizer() converts the descriptions into numerical vectors while ignoring common English words. The fit_transform() function learns important words and represents each movie description numerically. Next, cosine_similarity() compares the vectors of all movies to calculate their similarity scores. The recommend() function accepts a movie title as input and checks whether it exists in the dataset. If the movie is not found, the program displays a message. Otherwise, it finds the movie's index, retrieves its similarity scores, sorts the scores in descending order, and selects the three most similar movies. Finally, the program displays the recommended movie titles using print().
+
+my project is a Content-Based Movie Recommendation System. The main aim of this project is to recommend movies based on the description of a movie selected by the user. First, I store movie names and their descriptions in a dataset using Pandas. Then I use TF-IDF to convert the text descriptions into numerical values that the computer can understand. After that, I use Cosine Similarity to compare the descriptions and calculate how similar the movies are. When the user enters a movie name, the program finds that movie in the dataset, compares it with other movies, and sorts the results according to their similarity scores. Finally, it displays the three most similar movies. This system recommends movies based on their content, not on the ratings or preferences of other users
